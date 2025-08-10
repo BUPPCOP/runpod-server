@@ -1,13 +1,8 @@
-* text=auto
-*.sh text eol=lf
-*.py text eol=lf
-*.md text eol=lf
-*.json text eol=lf
+* text=auto eol=lf
 *.bat text eol=crlf
 
-# Binaries
+# Binary (변환 금지)
 *.safetensors -text
-*.bin -text
-*.mp4 -text
-*.gif -text
-    
+*.bin        -text
+*.mp4        -text
+*.gif        -text

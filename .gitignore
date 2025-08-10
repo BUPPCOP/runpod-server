@@ -1,7 +1,22 @@
-venv/
-app/models/
+# Python cache
 __pycache__/
 *.pyc
+
+# Virtual environment
+venv/
+
+# Models & artifacts
+app/models/
 *.mp4
 *.gif
+
+# Logs
+*.log
+
+# Env
 .env
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
