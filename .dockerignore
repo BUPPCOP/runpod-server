@@ -1,0 +1,17 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+
+# Large model & media artifacts
+app/models/
+*.mp4
+*.gif
+
+# Git / OS junk
+.git
+.gitignore
+.DS_Store
+*.log
