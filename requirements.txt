@@ -1,9 +1,12 @@
-fastapi
-uvicorn
-torch
-diffusers
-transformers
-safetensors
-accelerate
-huggingface_hub
-pillow
+fastapi==0.116.1
+uvicorn==0.35.0
+
+# Core
+torch==2.8.0
+diffusers==0.34.0
+transformers==4.55.0
+safetensors==0.6.2
+accelerate==1.10.0
+huggingface_hub==0.34.4
+pillow==11.3.0
+imageio==2.36.0

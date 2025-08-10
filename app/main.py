@@ -1,27 +1,48 @@
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
+from typing import Optional
+
 from app.inference import generate_video
 
-app = FastAPI(title="AnimateDiff Lightning API")
+app = FastAPI(title="AnimateDiff-Lightning Server", version="1.0.0")
 
-class PromptRequest(BaseModel):
+
+class GenerateRequest(BaseModel):
     prompt: str = Field(..., description="텍스트 프롬프트")
-    steps: int = Field(4, ge=1, le=8, description="추론 스텝(1/2/4/8)")
-    guidance_scale: float = Field(1.0, ge=0.0, le=10.0)
-    fps: int = Field(8, ge=1, le=60)
-    out_path: str = Field("output.gif")
+    negative_prompt: Optional[str] = None
+    width: int = 512
+    height: int = 512
+    num_frames: int = 16
+    steps: int = Field(4, description="num_inference_steps (Lightning은 4 권장)")
+    guidance_scale: float = 1.0
+    seed: Optional[int] = None
+    fps: int = 8
+    out_path: Optional[str] = None
 
-@app.get("/")
-def root():
-    return {"status": "ok", "message": "AnimateDiff Lightning API"}
 
-@app.post("/generate")
-def generate(req: PromptRequest):
+class GenerateResponse(BaseModel):
+    path: str
+    seed: int
+
+
+@app.get("/healthz")
+def health() -> dict:
+    return {"status": "ok"}
+
+
+@app.post("/generate", response_model=GenerateResponse)
+def generate(req: GenerateRequest):
     path = generate_video(
         prompt=req.prompt,
-        steps=req.steps,
+        negative_prompt=req.negative_prompt,
+        width=req.width,
+        height=req.height,
+        num_frames=req.num_frames,
+        num_inference_steps=req.steps,
         guidance_scale=req.guidance_scale,
+        seed=req.seed,
         fps=req.fps,
-        out_path=req.out_path
+        out_path=req.out_path,
     )
-    return {"status": "success", "output": path}
+    # seed는 파일명에서 복구할 수 없으니 요청값 그대로 반환(없으면 None)
+    return GenerateResponse(path=path, seed=req.seed if req.seed is not None else -1)

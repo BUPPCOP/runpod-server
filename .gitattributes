@@ -1,8 +1,0 @@
-* text=auto eol=lf
-*.bat text eol=crlf
-
-# Binary (변환 금지)
-*.safetensors -text
-*.bin        -text
-*.mp4        -text
-*.gif        -text
