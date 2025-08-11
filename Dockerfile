@@ -6,9 +6,9 @@ FROM ${BASE_IMAGE}
 
 # 필수 도구만 설치 (추천 패키지 제외 + 캐시 정리)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git \
-      ffmpeg \
+    git ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+
 
 WORKDIR /app
 
