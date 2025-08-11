@@ -16,3 +16,6 @@ outputs/
 .git/
 models/
 app/models/
+
+.cache/
+data/
