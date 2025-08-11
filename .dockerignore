@@ -1,37 +1,18 @@
-# VCS
-.git
-.gitmodules
-.github
-
-# Python / cache
+# Local env
+venv/
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
 *.log
-*.tmp
-*.lock
-
-# Virtual env / tools
-venv/
-.env
-.env.*
-.venv/
-
-# Node (혹시 있을 경우)
-node_modules/
-
-# OS / IDE
 .DS_Store
-Thumbs.db
-.vscode/
-.idea/
 
-# Artifacts / media
+# Artifacts
 *.mp4
 *.gif
+inputs/
+outputs/
 
-# Local model/data (빌드시 전송 방지)
+# Huge
+.git/
+models/
 app/models/
-data/
-.cache/

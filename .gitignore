@@ -1,26 +1,18 @@
 # Python
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-*.log
 
 # venv
 venv/
-.venv/
-.env
-.env.*
 
-# OS / IDE
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-
-# Huge artifacts
+# Models & Artifacts
+models/
+app/models/
+inputs/
+outputs/
 *.mp4
 *.gif
 
-# 모델은 레포에 올리지 않음 (이미지 빌드시 다운로드)
-app/models/
-!app/models/.gitkeep
+# OS / IDE
+.DS_Store
+*.log

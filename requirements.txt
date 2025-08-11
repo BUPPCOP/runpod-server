@@ -1,9 +1,13 @@
 fastapi
 uvicorn
-torch
-diffusers
+torch             # GPU 환경에 맞는 wheel 자동 선택 (컨테이너 베이스에 따라 다름)
+diffusers>=0.29.0
 transformers
-safetensors
 accelerate
+safetensors
 huggingface_hub
 pillow
+python-multipart
+imageio[ffmpeg]
+runpod
+requests

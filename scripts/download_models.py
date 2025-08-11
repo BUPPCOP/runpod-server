@@ -1,29 +1,30 @@
+# scripts/download_models.py
 import os
-from pathlib import Path
-from huggingface_hub import snapshot_download, hf_hub_download
+from huggingface_hub import snapshot_download
 
-HF_TOKEN = os.environ.get("HF_TOKEN") or None
+HF_TOKEN = os.getenv("HF_TOKEN", None)
 
-BASE = Path("app/models")
-BASE.mkdir(parents=True, exist_ok=True)
-(BASE / "animatediff").mkdir(parents=True, exist_ok=True)
-(BASE / "base").mkdir(parents=True, exist_ok=True)
+# 빌드 인자로 대체 가능
+AD_LIGHTNING_REPO = os.getenv("AD_LIGHTNING_REPO", "ByteDance/AnimateDiff-Lightning")  # 예시 레포
+BASE_REPO = os.getenv("BASE_REPO", "runwayml/stable-diffusion-v1-5")                  # SD1.5 예시
+TARGET_DIR = os.getenv("TARGET_DIR", "/app/models")
 
-print("📦 Downloading base model: emilianJR/epiCRealism -> app/models/base")
-snapshot_download(
-    repo_id="emilianJR/epiCRealism",
-    local_dir=str(BASE / "base"),
-    local_dir_use_symlinks=False,
-    token=HF_TOKEN,
-)
 
-print("📦 Downloading AnimateDiff-Lightning 4-step -> app/models/animatediff")
-hf_hub_download(
-    repo_id="ByteDance/AnimateDiff-Lightning",
-    filename="animatediff_lightning_4step_diffusers.safetensors",
-    local_dir=str(BASE / "animatediff"),
-    local_dir_use_symlinks=False,
-    token=HF_TOKEN,
-)
+def pull(repo_id: str, subdir: str):
+    local_dir = os.path.join(TARGET_DIR, subdir)
+    os.makedirs(local_dir, exist_ok=True)
+    print(f"[DL] {repo_id} -> {local_dir}")
+    snapshot_download(
+        repo_id=repo_id,
+        local_dir=local_dir,
+        local_dir_use_symlinks=False,
+        token=HF_TOKEN,
+        tqdm_class=None,
+    )
+    print(f"[OK] {repo_id}")
 
-print("✅ Model assets baked into the image.")
+
+if __name__ == "__main__":
+    pull(BASE_REPO, "sd_base")
+    pull(AD_LIGHTNING_REPO, "ad_lightning")
+    print("[DONE] All models cached in image.")
