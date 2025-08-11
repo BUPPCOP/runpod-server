@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.6
-- ARG BASE_IMAGE=runpod/pytorch:2.4.0-cuda12.1
-+ ARG BASE_IMAGE=runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+ARG BASE_IMAGE=runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 FROM ${BASE_IMAGE}
+
 
 
 # 필수 도구만 설치 (추천 패키지 제외 + 캐시 정리)
