@@ -1,81 +1,105 @@
 # scripts/download_models.py
-import os
-import sys
-import time
+import os, sys, time, traceback, shutil, subprocess
+from pathlib import Path
 from typing import Iterable
 from huggingface_hub import snapshot_download, hf_hub_download, HfHubHTTPError
 
-HF_TOKEN = os.getenv("HF_TOKEN", None)
-
-# ▼ 필요한 경우에만 교체 가능 (Build Args/Env로 주입 가능)
-AD_LIGHTNING_REPO = os.getenv("AD_LIGHTNING_REPO", "ByteDance/AnimateDiff-Lightning")
-# diffusers 포맷 SD1.5 (전체 스냅샷은 큼 → allow_patterns로 필요한 것만)
+HF_TOKEN = os.getenv("HF_TOKEN")
 BASE_REPO = os.getenv("BASE_REPO", "runwayml/stable-diffusion-v1-5")
+AD_LIGHTNING_REPO = os.getenv("AD_LIGHTNING_REPO", "ByteDance/AnimateDiff-Lightning")
+TARGET_DIR = Path(os.getenv("TARGET_DIR", "/app/models"))
 
-TARGET_DIR = os.getenv("TARGET_DIR", "/app/models")
-
-# 필요한 파일만 받기 (용량/시간 절감)
-BASE_PATTERNS: list[str] = [
-    "feature_extractor/*",
-    "scheduler/*",
-    "vae/*",
-    "text_encoder/*",
-    "tokenizer/*",
-    "unet/*",
-    "model_index.json",
-    "*.json",
-    "*.txt",
-    "*.safetensors",
-    "*.bin",
+BASE_PATTERNS = [
+    "feature_extractor/**","scheduler/**","vae/**","text_encoder/**","tokenizer/**","unet/**",
+    "model_index.json","*.json","*.txt","*.safetensors","*.bin",
 ]
-AD_PATTERNS: list[str] = [
-    # lightning 4-step diffusers 가중치/구성만
+AD_PATTERNS = [
     "**/animatediff_lightning_4step_diffusers*/**",
-    "model_index.json",
-    "*.json",
-    "*.safetensors",
-    "*.bin",
+    "model_index.json","*.json","*.safetensors","*.bin",
 ]
 
 MAX_RETRIES = 3
 RETRY_WAIT = 10
 
+def log_env():
+    print("[ENV] HF_TOKEN set:", bool(HF_TOKEN))
+    print("[ENV] HF_HOME:", os.getenv("HF_HOME"))
+    print("[ENV] HF_TRANSFER:", os.getenv("HF_HUB_ENABLE_HF_TRANSFER"))
+    print("[ENV] PYTHON:", sys.version)
+    # git-lfs 확인 (대용량 파일 필요 시)
+    try:
+        out = subprocess.check_output(["git-lfs","--version"]).decode().strip()
+        print("[ENV] git-lfs:", out)
+    except Exception as e:
+        print("[WARN] git-lfs not available:", e)
+
+def size_h(path: Path) -> str:
+    try:
+        # linux 환경 기준
+        out = subprocess.check_output(["du","-sh", str(path)]).decode().split()[0]
+        return out
+    except Exception:
+        return "-"
+
+def preflight(repo: str, file: str = "model_index.json"):
+    # 토큰/권한/404 문제를 빌드 초반에 명확히 드러냄
+    try:
+        tmp = hf_hub_download(repo_id=repo, filename=file, token=HF_TOKEN)
+        print(f"[PREFLIGHT OK] {repo}:{file} -> {tmp}")
+    except Exception as e:
+        print(f"[PREFLIGHT ERR] {repo}:{file} -> {e}", file=sys.stderr)
+        raise
+
 def pull(repo_id: str, subdir: str, patterns: Iterable[str]):
-    local_dir = os.path.join(TARGET_DIR, subdir)
-    os.makedirs(local_dir, exist_ok=True)
+    local_dir = TARGET_DIR / subdir
+    local_dir.mkdir(parents=True, exist_ok=True)
     last_err = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            print(f"[DL] repo={repo_id} → {local_dir} (try {attempt}/{MAX_RETRIES})")
+            print(f"[DL] {repo_id} → {local_dir} (try {attempt}/{MAX_RETRIES})")
             snapshot_download(
                 repo_id=repo_id,
-                local_dir=local_dir,
+                local_dir=str(local_dir),
                 local_dir_use_symlinks=False,
                 token=HF_TOKEN,
                 allow_patterns=list(patterns),
-                max_workers=8,  # 병렬
-                tqdm_class=None,
                 resume_download=True,
+                max_workers=8,
             )
-            print(f"[OK] {repo_id}")
+            print(f"[OK] {repo_id} done. dir={local_dir} size={size_h(local_dir)}")
             return
         except HfHubHTTPError as e:
             last_err = e
-            # 권한/토큰/쿼터 오류는 바로 실패 메시지 명확히
-            print(f"[ERR] HfHubHTTPError for {repo_id}: {e}", file=sys.stderr)
-            if e.response is not None and e.response.status_code in (401, 403, 404):
-                break  # 재시도 의미 없음
+            code = getattr(getattr(e, "response", None), "status_code", None)
+            print(f"[HF ERR] repo={repo_id} code={code} msg={e}", file=sys.stderr)
+            if code in (401,403,404):
+                break  # 권한/존재 문제는 재시도 무의미
         except Exception as e:
             last_err = e
-            print(f"[ERR] Generic error for {repo_id}: {e}", file=sys.stderr)
+            print(f"[GEN ERR] repo={repo_id} type={type(e).__name__} msg={e}", file=sys.stderr)
+            traceback.print_exc()
         time.sleep(RETRY_WAIT)
-    raise SystemExit(f"[FATAL] Failed to download {repo_id}: {last_err}")
+    raise SystemExit(f"[FATAL] download failed: {repo_id} -> {last_err}")
 
 if __name__ == "__main__":
-    # 토큰 체크(선택): 공개 레포면 없어도 되지만, 쿼터/속도 이슈 완화 위해 권장
-    if HF_TOKEN is None:
-        print("[WARN] HF_TOKEN not set. Public repos are fine, but you may hit rate limits.")
+    try:
+        print("[INFO] download_models.py start")
+        log_env()
 
-    pull(BASE_REPO, "sd_base", BASE_PATTERNS)
-    pull(AD_LIGHTNING_REPO, "ad_lightning", AD_PATTERNS)
-    print("[DONE] All models cached in image.")
+        # 프리플라이트로 권한/404 즉시 확인
+        preflight(BASE_REPO)
+        preflight(AD_LIGHTNING_REPO)
+
+        pull(BASE_REPO, "sd_base", BASE_PATTERNS)
+        pull(AD_LIGHTNING_REPO, "ad_lightning", AD_PATTERNS)
+
+        total = size_h(TARGET_DIR)
+        print(f"[DONE] Models baked at {TARGET_DIR} (total {total})")
+
+    except SystemExit as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print("[UNCAUGHT]", e, file=sys.stderr)
+        traceback.print_exc()
+        sys.exit(1)
