@@ -1,8 +1,5 @@
 # scripts/download_models.py
-# 이미지 빌드 시 필요한 모델만 '부분 다운로드'하여 /app/models 에 베이킹
-# - Hugging Face 토큰/권한/404/네트워크 문제를 명확히 로깅
-# - hf_transfer + resume_download 로 속도/안정성 강화
-# - 특정 버전에서 HfHubHTTPError 경로가 달라지는 문제를 우회(범용 예외 처리)
+# 빌드 중 모델 '부분 다운로드' 베이크 + 원인 가시화(네트워크/토큰/404/용량)
 
 import os
 import sys
@@ -16,32 +13,19 @@ import huggingface_hub as hf
 
 HF_TOKEN = os.getenv("HF_TOKEN")
 
-# 필요 시 환경변수로 교체 가능
+# 변경 가능(환경변수로 덮어쓰기)
 BASE_REPO = os.getenv("BASE_REPO", "runwayml/stable-diffusion-v1-5")
 AD_LIGHTNING_REPO = os.getenv("AD_LIGHTNING_REPO", "ByteDance/AnimateDiff-Lightning")
-
 TARGET_DIR = Path(os.getenv("TARGET_DIR", "/app/models"))
 
-# 용량/시간 절감을 위해 꼭 쓰는 파일만 허용
+# 용량/시간 절감을 위해 필요한 파일만
 BASE_PATTERNS = [
-    "feature_extractor/**",
-    "scheduler/**",
-    "vae/**",
-    "text_encoder/**",
-    "tokenizer/**",
-    "unet/**",
-    "model_index.json",
-    "*.json",
-    "*.txt",
-    "*.safetensors",
-    "*.bin",
+    "feature_extractor/**","scheduler/**","vae/**","text_encoder/**","tokenizer/**","unet/**",
+    "model_index.json","*.json","*.txt","*.safetensors","*.bin",
 ]
 AD_PATTERNS = [
     "**/animatediff_lightning_4step_diffusers*/**",
-    "model_index.json",
-    "*.json",
-    "*.safetensors",
-    "*.bin",
+    "model_index.json","*.json","*.safetensors","*.bin",
 ]
 
 MAX_RETRIES = 3
@@ -54,6 +38,7 @@ def _print_env():
     print("[ENV] HF_TRANSFER:", os.getenv("HF_HUB_ENABLE_HF_TRANSFER"))
     print("[ENV] PYTHON:", sys.version)
     print("[ENV] huggingface_hub:", getattr(hf, "__version__", "unknown"))
+    # git-lfs 확인
     try:
         out = subprocess.check_output(["git-lfs", "--version"]).decode().strip()
         print("[ENV] git-lfs:", out)
@@ -69,8 +54,16 @@ def _du_h(path: Path) -> str:
         return "-"
 
 
+def _curl_head(url: str, timeout: int = 10):
+    try:
+        print(f"[NET] HEAD {url}")
+        subprocess.check_call(["curl", "-I", url, "-m", str(timeout)])
+    except Exception as e:
+        print(f"[NET] curl failed: {e}", file=sys.stderr)
+
+
 def preflight(repo: str, file: str = "model_index.json"):
-    """권한/토큰/404 문제를 빌드 초기에 바로 드러내기"""
+    """권한/존재/토큰 문제를 빌드 초기에 명확히."""
     try:
         tmp = hf_hub_download(repo_id=repo, filename=file, token=HF_TOKEN)
         print(f"[PREFLIGHT OK] {repo}:{file} -> {tmp}")
@@ -114,6 +107,8 @@ if __name__ == "__main__":
     try:
         print("[INFO] download_models.py start")
         _print_env()
+        _curl_head("https://huggingface.co")
+        _curl_head("https://cdn-lfs.huggingface.co")
 
         # 권한/존재/토큰 문제를 초기에 확인
         preflight(BASE_REPO)
