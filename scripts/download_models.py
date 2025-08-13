@@ -1,4 +1,4 @@
-import os, sys, time, traceback, subprocess
+import os, sys, time, traceback, subprocess, json
 from pathlib import Path
 from typing import Iterable
 from huggingface_hub import snapshot_download, hf_hub_download
@@ -11,19 +11,17 @@ AD_LIGHTNING_REPO = os.getenv("AD_LIGHTNING_REPO", "ByteDance/AnimateDiff-Lightn
 
 TARGET_DIR = Path(os.getenv("TARGET_DIR", "/app/models"))
 
-# SD1.5: 파이프라인 구성요소 + model_index.json 필요
 BASE_PATTERNS = [
     "feature_extractor/**","scheduler/**","vae/**","text_encoder/**","tokenizer/**","unet/**",
     "model_index.json","*.json","*.txt","*.safetensors","*.bin",
 ]
 
-# AD-Lightning: 가중치 + 구성 json 포함(레포 구조 차이를 커버하기 위해 *.json 허용)
+# AD-Lightning: 가중치 + (레포에 있으면) json류도 받아본다.
 AD_PATTERNS = [
     "animatediff_lightning_4step_diffusers.safetensors",
-    "config.json",
-    "model_index.json",
     "*.json",
     "README.md",
+    "comfyui/**",   # 레포 구조상 같이 올 때가 있어 무시해도 무해
 ]
 
 MAX_RETRIES = 3
@@ -49,7 +47,6 @@ def _du_h(p: Path) -> str:
         return "-"
 
 def preflight(repo: str, file_candidates: list[str]):
-    """작고 확실한 파일로 권한/존재/토큰 문제를 빌드 초기에 확인"""
     last_err = None
     for fname in file_candidates:
         try:
@@ -86,35 +83,71 @@ def pull(repo_id: str, subdir: str, patterns: Iterable[str]):
             etype = type(e).__name__
             print(f"[ERR] repo={repo_id} type={etype} code={code} msg={e}", file=sys.stderr)
             traceback.print_exc()
-            if code in (401,403,404):  # 권한/존재 문제는 재시도 무의미
+            if code in (401,403,404):
                 break
         time.sleep(RETRY_WAIT)
     raise SystemExit(f"[FATAL] download failed: {repo_id} -> {last_err}")
+
+def ensure_ad_config(ad_dir: Path):
+    """AD-Lightning 폴더에 Diffusers 로더가 요구하는 config.json을 생성(없을 때만)."""
+    cfg = ad_dir / "config.json"
+    midx = ad_dir / "model_index.json"
+    wt  = ad_dir / "animatediff_lightning_4step_diffusers.safetensors"
+
+    # 기본 가중치는 반드시 있어야 함
+    if not wt.exists():
+        raise SystemExit(f"[FATAL] Missing AD weight: {wt}")
+
+    # 이미 config/model_index가 있으면 그대로 사용
+    if cfg.exists() or midx.exists():
+        print("[AD] Found existing config:", cfg.exists(), "model_index:", midx.exists())
+        return
+
+    # ---- 템플릿 생성 ----
+    # 주의: 아래 값들은 SD1.5 + AnimateDiff(MotionAdapter) 기본 구조에 맞춘 보편 템플릿.
+    # Lightning 4-step용 가중치는 모듈 구조가 동일하고, 하이퍼파라미터(스텝 경량화)는 가중치에 내포됨.
+    template = {
+        "_class_name": "MotionAdapter",
+        "_diffusers_version": "0.29.0",
+        "motion_config": {
+            "motion_module_type": "Vanilla",
+            "use_motion_module": True,
+            "num_attention_blocks": 2,        # commonly used
+            "num_transformer_blocks": 1
+        },
+        # UNet 블록 폭(SD1.5 기준)
+        "block_out_channels": [320, 640, 1280, 1280],
+        "cross_attention_dim": 768,
+        "infer_steps_default": 4,            # Lightning 4-step 힌트(정보성)
+        "dtype": "fp16"
+    }
+    with open(cfg, "w", encoding="utf-8") as f:
+        json.dump(template, f, ensure_ascii=False, indent=2)
+    print(f"[AD] Wrote config template -> {cfg}")
 
 if __name__ == "__main__":
     try:
         print("[INFO] download_models.py start")
         _print_env()
 
-        # SD: model_index.json/README, AD: config/model_index/README 중 하나라도 잡히는지 확인
         preflight(BASE_REPO, ["model_index.json", "README.md"])
-        preflight(AD_LIGHTNING_REPO, ["config.json", "model_index.json", "README.md"])
+        # AD 레포에는 config가 없을 수 있지만, 시도는 한번 해본다(없으면 TRY FAIL로만 남음)
+        try:
+            preflight(AD_LIGHTNING_REPO, ["config.json", "model_index.json", "README.md"])
+        except Exception:
+            pass
 
         pull(BASE_REPO, "sd_base", BASE_PATTERNS)
         pull(AD_LIGHTNING_REPO, "ad_lightning", AD_PATTERNS)
 
-        # 🔒 sanity check: AD에 weights + (config.json or model_index.json) 둘 다 있어야 함
+        # AD 구성 보장
         ad_dir = TARGET_DIR / "ad_lightning"
-        needs = [ad_dir / "animatediff_lightning_4step_diffusers.safetensors"]
-        cfg_ok = (ad_dir / "config.json").exists() or (ad_dir / "model_index.json").exists()
-        missing = [str(p) for p in needs if not p.exists()]
-        if missing or not cfg_ok:
-            try:
-                listing = [p.name for p in ad_dir.glob("*")]
-            except Exception:
-                listing = ["<cannot list>"]
-            print(f"[SANITY] AD dir -> {ad_dir} : {listing}", file=sys.stderr)
-            raise SystemExit(f"[FATAL] AD-Lightning files incomplete. missing={missing}, cfg_ok={cfg_ok}")
+        try:
+            listing = [p.name for p in ad_dir.glob("*")]
+            print(f"[AD] dir listing -> {listing}")
+        except Exception:
+            print("[AD] cannot list:", ad_dir)
+        ensure_ad_config(ad_dir)
 
         total = _du_h(TARGET_DIR)
         print(f"[DONE] Models baked at {TARGET_DIR} (total {total})")

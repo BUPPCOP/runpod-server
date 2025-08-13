@@ -7,15 +7,13 @@ from PIL import Image
 from diffusers import (
     DDIMScheduler,
     MotionAdapter,
-    AnimateDiffPipeline,   # diffusers >= 0.29.0
+    AnimateDiffPipeline,
 )
-
 from app.utils import save_mp4
 
 MODELS_DIR = os.getenv("MODELS_DIR", "/app/models")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# 모델 디렉토리 (빌드 시 download_models.py가 내려줌)
 SD_DIR = os.path.join(MODELS_DIR, "sd_base")
 AD_DIR = os.path.join(MODELS_DIR, "ad_lightning")
 
@@ -26,24 +24,21 @@ def get_pipeline():
     if _pipe is not None:
         return _pipe
 
-    # 디버그: AD 폴더 내용 찍어두기
     try:
         print("[AD_PATH]", AD_DIR, "->", os.listdir(AD_DIR))
     except Exception:
         print("[AD_PATH] cannot list:", AD_DIR)
 
-    # AnimateDiff-Lightning 모션 어댑터
     adapter = MotionAdapter.from_pretrained(
         AD_DIR,
         torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
     )
 
-    # SD1.5(Base) + MotionAdapter 결합
     pipe = AnimateDiffPipeline.from_pretrained(
         SD_DIR,
         motion_adapter=adapter,
         torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
-        safety_checker=None,  # 필요시 활성화
+        safety_checker=None,
     )
 
     pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
@@ -69,7 +64,6 @@ def run_inference_animatediff(
     guidance_scale: float = 1.0,
     seed: Optional[int] = None,
 ) -> bool:
-    """정적 이미지 → 짧은 모션 영상(mp4) 생성"""
     try:
         pipe = get_pipeline()
         generator = torch.Generator(device=DEVICE)
@@ -85,8 +79,7 @@ def run_inference_animatediff(
             guidance_scale=guidance_scale,
             generator=generator,
         )
-        frames = result.frames  # List[PIL.Image.Image]
-
+        frames = result.frames
         save_mp4(frames, output_path, fps=fps)
         return True
     except Exception as e:
