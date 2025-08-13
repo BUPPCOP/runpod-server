@@ -1,83 +1,74 @@
-# handler.py
-import os
-import base64
-import tempfile
-from pathlib import Path
-
-import requests
+import os, sys, json, traceback, base64, uuid, time
 import runpod
-
+from urllib.request import urlopen, Request
 from app.inference import run_inference_animatediff
 
-OUT_DIR = Path("/app/outputs")
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+TMP_DIR = "/tmp"
+os.makedirs(TMP_DIR, exist_ok=True)
 
+def _save_input_image(image_url: str | None, image_base64: str | None) -> str:
+    """image_url 또는 image_base64 중 하나를 받아 /tmp에 저장하고 경로 반환."""
+    out_path = os.path.join(TMP_DIR, f"input_{uuid.uuid4().hex}.jpg")
+    if image_url:
+        print(f"[HANDLER] downloading image_url: {image_url}", flush=True)
+        # 간단/안전: urllib 직접 사용 (추가 deps 불필요)
+        req = Request(image_url, headers={"User-Agent": "curl/8"})
+        with urlopen(req, timeout=30) as r, open(out_path, "wb") as f:
+            f.write(r.read())
+        return out_path
+    if image_base64:
+        print("[HANDLER] decoding image_base64", flush=True)
+        data = base64.b64decode(image_base64)
+        with open(out_path, "wb") as f:
+            f.write(data)
+        return out_path
+    raise ValueError("image_url or image_base64 is required")
 
-def _download_to_tmp(url_or_b64: str) -> str:
-    """image_url(HTTP) 또는 base64 문자열을 임시 파일로 저장 후 경로 반환"""
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    if url_or_b64.startswith("http://") or url_or_b64.startswith("https://"):
-        r = requests.get(url_or_b64, timeout=60)
-        r.raise_for_status()
-        tmp.write(r.content)
-    else:
-        # base64: data URL 형식도 허용 (data:image/png;base64,....)
-        if url_or_b64.startswith("data:"):
-            url_or_b64 = url_or_b64.split(",", 1)[-1]
-        tmp.write(base64.b64decode(url_or_b64))
-    tmp.close()
-    return tmp.name
+def handler(event):
+    t0 = time.time()
+    try:
+        print("[HANDLER] event received:", json.dumps({
+            "id": event.get("id"),
+            "has_input": bool(event.get("input")),
+        }), flush=True)
 
+        payload = event.get("input") or {}
+        image_url = payload.get("image_url")
+        image_b64 = payload.get("image_base64") or payload.get("image_b64")  # 두 키 모두 허용
+        seed = payload.get("seed")
+        num_frames = int(payload.get("num_frames", 16))
+        fps = int(payload.get("fps", 8))
+        guidance_scale = float(payload.get("guidance_scale", 1.0))
 
-def handler(job):
-    """
-    /run 입력 예시:
-    {
-      "input": {
-        "image_url": "https://.../input.png",   # 또는 "image_b64": "..."
-        "frames": 16,
-        "fps": 8,
-        "seed": 123,
-        "guidance": 1.0,
-        "output_presigned_url": "https://S3-PUT-URL"  # 선택
-      }
-    }
-    """
-    inp = job.get("input", {})
-    img_ref = inp.get("image_url") or inp.get("image_b64")
-    if not img_ref:
-        return {"error": "image_url or image_b64 is required"}
+        # 입력 확보
+        img_path = _save_input_image(image_url, image_b64)
+        out_path = os.path.join(TMP_DIR, f"out_{uuid.uuid4().hex}.mp4")
 
-    frames = int(inp.get("frames", 16))
-    fps = int(inp.get("fps", 8))
-    seed = inp.get("seed")
-    guidance = float(inp.get("guidance", 1.0))
+        # 추론
+        ok = run_inference_animatediff(
+            image_path=img_path,
+            output_path=out_path,
+            num_frames=num_frames,
+            fps=fps,
+            guidance_scale=guidance_scale,
+            seed=seed,
+        )
 
-    in_path = _download_to_tmp(img_ref)
-    out_path = str(OUT_DIR / (os.path.basename(in_path) + ".mp4"))
+        elapsed = int((time.time() - t0) * 1000)
+        if not ok:
+            print("[HANDLER] inference_failed", flush=True)
+            return {"error": "inference_failed", "ms": elapsed}
 
-    ok = run_inference_animatediff(
-        in_path,
-        out_path,
-        num_frames=frames,
-        fps=fps,
-        guidance_scale=guidance,
-        seed=seed,
-    )
-    if not ok:
-        return {"error": "inference_failed"}
+        print(f"[HANDLER] done -> {out_path}", flush=True)
+        return {
+            "success": True,
+            "ms": elapsed,
+            "video_path": out_path  # 필요하면 presigned URL 업로드로 교체 가능
+        }
 
-    # presigned URL 업로드 옵션
-    put_url = inp.get("output_presigned_url")
-    if put_url:
-        with open(out_path, "rb") as f:
-            requests.put(put_url, data=f, headers={"Content-Type": "video/mp4"}, timeout=120)
-        return {"video_url": put_url}
+    except Exception as e:
+        print("[HANDLER][EXC]", repr(e), flush=True)
+        traceback.print_exc()
+        return {"error": str(e)}
 
-    # 임시: 파일 경로 반환(워커 종료 시 사라질 수 있음)
-    return {"video_path": out_path}
-
-
-if __name__ == "__main__":
-    # Serverless 런타임 진입
-    runpod.serverless.start({"handler": handler})
+runpod.serverless.start({"handler": handler})

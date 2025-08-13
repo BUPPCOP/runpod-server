@@ -9,6 +9,7 @@ from diffusers import (
     MotionAdapter,
     AnimateDiffPipeline,
 )
+
 from app.utils import save_mp4
 
 MODELS_DIR = os.getenv("MODELS_DIR", "/app/models")
@@ -24,16 +25,19 @@ def get_pipeline():
     if _pipe is not None:
         return _pipe
 
+    # 디버그: AD 폴더 내용 출력 (config.json 유무 확인에 중요)
     try:
-        print("[AD_PATH]", AD_DIR, "->", os.listdir(AD_DIR))
-    except Exception:
-        print("[AD_PATH] cannot list:", AD_DIR)
+        print("[AD_PATH]", AD_DIR, "->", os.listdir(AD_DIR), flush=True)
+    except Exception as _:
+        print("[AD_PATH] cannot list:", AD_DIR, flush=True)
 
+    # 모션 어댑터 로드 (config.json 필요)
     adapter = MotionAdapter.from_pretrained(
         AD_DIR,
         torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
     )
 
+    # SD1.5 + 모션 어댑터
     pipe = AnimateDiffPipeline.from_pretrained(
         SD_DIR,
         motion_adapter=adapter,
@@ -64,7 +68,10 @@ def run_inference_animatediff(
     guidance_scale: float = 1.0,
     seed: Optional[int] = None,
 ) -> bool:
+    """정적 이미지 → 짧은 모션 영상(mp4) 생성"""
     try:
+        print(f"[INFER] start image={image_path} -> {output_path} frames={num_frames} fps={fps} g={guidance_scale} seed={seed}", flush=True)
+
         pipe = get_pipeline()
         generator = torch.Generator(device=DEVICE)
         if seed is not None:
@@ -79,9 +86,11 @@ def run_inference_animatediff(
             guidance_scale=guidance_scale,
             generator=generator,
         )
-        frames = result.frames
+        frames = result.frames  # List[PIL.Image.Image]
+
         save_mp4(frames, output_path, fps=fps)
+        print(f"[INFER] wrote {output_path}", flush=True)
         return True
     except Exception as e:
-        print(f"[ERROR] AnimateDiff inference failed: {e}")
+        print(f"[ERROR] AnimateDiff inference failed: {e}", flush=True)
         return False
