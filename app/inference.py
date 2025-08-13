@@ -1,4 +1,3 @@
-# app/inference.py
 import os
 from typing import Optional
 
@@ -22,11 +21,16 @@ AD_DIR = os.path.join(MODELS_DIR, "ad_lightning")
 
 _pipe = None
 
-
 def get_pipeline():
     global _pipe
     if _pipe is not None:
         return _pipe
+
+    # 디버그: AD 폴더 내용 찍어두기
+    try:
+        print("[AD_PATH]", AD_DIR, "->", os.listdir(AD_DIR))
+    except Exception:
+        print("[AD_PATH] cannot list:", AD_DIR)
 
     # AnimateDiff-Lightning 모션 어댑터
     adapter = MotionAdapter.from_pretrained(
@@ -46,19 +50,16 @@ def get_pipeline():
 
     if DEVICE == "cuda":
         pipe.to("cuda")
-        # 성능 최적화 옵션
         try:
             pipe.enable_xformers_memory_efficient_attention()
         except Exception:
             pass
         pipe.enable_vae_slicing()
     else:
-        # CPU 환경
         pipe.enable_vae_slicing()
 
     _pipe = pipe
     return _pipe
-
 
 def run_inference_animatediff(
     image_path: str,
@@ -77,7 +78,6 @@ def run_inference_animatediff(
 
         img = Image.open(image_path).convert("RGB")
 
-        # Prompt 없이 원본 유지 방향; 필요시 prompt/negative_prompt 인자 추가
         result = pipe(
             prompt="",
             image=img,

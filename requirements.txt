@@ -7,3 +7,5 @@ accelerate
 huggingface_hub[hf_transfer]==0.24.*
 pillow
 runpod
+imageio
+imageio-ffmpeg

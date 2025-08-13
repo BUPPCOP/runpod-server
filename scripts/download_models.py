@@ -1,4 +1,3 @@
-# scripts/download_models.py
 import os, sys, time, traceback, subprocess
 from pathlib import Path
 from typing import Iterable
@@ -12,15 +11,18 @@ AD_LIGHTNING_REPO = os.getenv("AD_LIGHTNING_REPO", "ByteDance/AnimateDiff-Lightn
 
 TARGET_DIR = Path(os.getenv("TARGET_DIR", "/app/models"))
 
-# SD1.5는 파이프라인 구성요소가 필요 → model_index.json 포함
+# SD1.5: 파이프라인 구성요소 + model_index.json 필요
 BASE_PATTERNS = [
     "feature_extractor/**","scheduler/**","vae/**","text_encoder/**","tokenizer/**","unet/**",
     "model_index.json","*.json","*.txt","*.safetensors","*.bin",
 ]
 
-# AD-Lightning은 '4-step diffusers' 체크포인트 한 개만 받도록 좁힘(용량/시간 절감)
+# AD-Lightning: 가중치 + 구성 json 포함(레포 구조 차이를 커버하기 위해 *.json 허용)
 AD_PATTERNS = [
     "animatediff_lightning_4step_diffusers.safetensors",
+    "config.json",
+    "model_index.json",
+    "*.json",
     "README.md",
 ]
 
@@ -47,7 +49,7 @@ def _du_h(p: Path) -> str:
         return "-"
 
 def preflight(repo: str, file_candidates: list[str]):
-    """권한/존재/토큰 문제를 빌드 초기 단계에서 작고 확실한 파일로 확인"""
+    """작고 확실한 파일로 권한/존재/토큰 문제를 빌드 초기에 확인"""
     last_err = None
     for fname in file_candidates:
         try:
@@ -94,17 +96,30 @@ if __name__ == "__main__":
         print("[INFO] download_models.py start")
         _print_env()
 
-        # 프리플라이트: SD1.5는 model_index.json, AD-Lightning은 README.md로 가볍게 체크
+        # SD: model_index.json/README, AD: config/model_index/README 중 하나라도 잡히는지 확인
         preflight(BASE_REPO, ["model_index.json", "README.md"])
-        preflight(AD_LIGHTNING_REPO, ["README.md"])
+        preflight(AD_LIGHTNING_REPO, ["config.json", "model_index.json", "README.md"])
 
         pull(BASE_REPO, "sd_base", BASE_PATTERNS)
         pull(AD_LIGHTNING_REPO, "ad_lightning", AD_PATTERNS)
 
+        # 🔒 sanity check: AD에 weights + (config.json or model_index.json) 둘 다 있어야 함
+        ad_dir = TARGET_DIR / "ad_lightning"
+        needs = [ad_dir / "animatediff_lightning_4step_diffusers.safetensors"]
+        cfg_ok = (ad_dir / "config.json").exists() or (ad_dir / "model_index.json").exists()
+        missing = [str(p) for p in needs if not p.exists()]
+        if missing or not cfg_ok:
+            try:
+                listing = [p.name for p in ad_dir.glob("*")]
+            except Exception:
+                listing = ["<cannot list>"]
+            print(f"[SANITY] AD dir -> {ad_dir} : {listing}", file=sys.stderr)
+            raise SystemExit(f"[FATAL] AD-Lightning files incomplete. missing={missing}, cfg_ok={cfg_ok}")
+
         total = _du_h(TARGET_DIR)
         print(f"[DONE] Models baked at {TARGET_DIR} (total {total})")
+
     except SystemExit as e:
         print(str(e), file=sys.stderr); sys.exit(1)
     except Exception as e:
         print("[UNCAUGHT]", e, file=sys.stderr); traceback.print_exc(); sys.exit(1)
-        
