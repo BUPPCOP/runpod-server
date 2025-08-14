@@ -1,5 +1,5 @@
 import os
-from typing import Optional, List
+from typing import Optional, List, Tuple
 import torch
 from PIL import Image
 
@@ -14,8 +14,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 def _load_image(path: str) -> Image.Image:
     im = Image.open(path).convert("RGB")
-    # 안전하게 768 이내로 다운스케일 (OOM 회피)
-    im.thumbnail((768, 768))
+    im.thumbnail((768, 768))  # OOM 방지
     return im
 
 def _ensure_models():
@@ -33,19 +32,17 @@ def run_inference_animatediff(
     num_frames: int = 16,
     fps: int = 8,
     guidance_scale: float = 1.0,
-) -> (bool, Optional[str]):
+) -> Tuple[bool, Optional[str], Optional[str]]:
     _ensure_models()
     try:
         torch.manual_seed(seed)
 
-        adapter = MotionAdapter.from_pretrained(
-            AD_DIR,
-            torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32
-        )
+        dtype = torch.float16 if DEVICE == "cuda" else torch.float32
+        adapter = MotionAdapter.from_pretrained(AD_DIR, torch_dtype=dtype)
         pipe = AnimateDiffPipeline.from_pretrained(
             SD_DIR,
             motion_adapter=adapter,
-            torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
+            torch_dtype=dtype,
         ).to(DEVICE)
 
         if DEVICE == "cuda":
@@ -54,7 +51,6 @@ def run_inference_animatediff(
             except Exception:
                 pass
         else:
-            # CPU일 때 메모리 안전 장치
             try:
                 pipe.enable_model_cpu_offload()
             except Exception:
@@ -62,8 +58,9 @@ def run_inference_animatediff(
 
         init_image = _load_image(image_path)
 
+        # ★ 가장 중요한 수정: image= 로 명시
         result = pipe(
-            init_image,
+            image=init_image,
             guidance_scale=guidance_scale,
             num_frames=num_frames,
             output_type="pil",
@@ -73,10 +70,11 @@ def run_inference_animatediff(
         out_path = f"/tmp/out_{os.path.basename(image_path)}.mp4"
         save_mp4(frames, out_path, fps=fps)
         print(f"[INFER] wrote {out_path}", flush=True)
-        return True, out_path
+        return True, out_path, None
 
     except Exception as e:
         import traceback
+        tb = traceback.format_exc()
         print(f"[ERROR] AnimateDiff inference failed: {e}", flush=True)
-        traceback.print_exc()
-        return False, None
+        print(tb, flush=True)
+        return False, None, f"{e}\n{tb}"

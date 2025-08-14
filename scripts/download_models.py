@@ -12,18 +12,27 @@ AD_REPO   = os.getenv("AD_LIGHTNING_REPO", "ByteDance/AnimateDiff-Lightning")
 def ensure_dir(p: Path):
     p.mkdir(parents=True, exist_ok=True)
 
-def write_ad_config_if_missing(ad_dir: Path):
+def _pick_ad_safetensors(ad_dir: Path) -> str:
+    """레포에서 받은 .safetensors 중 4‑step/diffusers 포함 파일을 우선 선택"""
+    cands = list(ad_dir.glob("*.safetensors"))
+    if not cands:
+        raise RuntimeError("AD Lightning *.safetensors not found")
+    # 우선순위: 4step, diffusers 키워드
+    def score(p: Path):
+        name = p.name.lower()
+        return int("4step" in name) + int("diffusers" in name)
+    cands.sort(key=score, reverse=True)
+    return cands[0].name  # 파일명만 반환
+
+def write_ad_config(ad_dir: Path, weight_name: str):
     cfg = ad_dir / "config.json"
-    if cfg.exists():
-        print("[AD] config.json already exists")
-        return
     template = {
         "_class_name": "MotionAdapter",
         "sample_size": 512,
-        "motion_modules": ["animatediff_lightning_4step_diffusers.safetensors"]
+        "motion_modules": [weight_name]
     }
     cfg.write_text(json.dumps(template, indent=2))
-    print(f"[AD] Wrote config template -> {cfg}")
+    print(f"[AD] Wrote config -> {cfg} (motion_modules={weight_name})")
 
 def main():
     print("[ENV] HF_HOME:", os.getenv("HF_HOME"))
@@ -35,13 +44,8 @@ def main():
     print("[OK] downloading AD Lightning:", AD_REPO)
     snapshot_download(repo_id=AD_REPO, local_dir=AD_DIR.as_posix(), local_dir_use_symlinks=False)
 
-    write_ad_config_if_missing(AD_DIR)
-
-    safes = list(AD_DIR.glob("*.safetensors"))
-    if not safes:
-        raise RuntimeError("AD Lightning *.safetensors not found")
-    if not (AD_DIR / "config.json").exists():
-        raise RuntimeError("AD Lightning config.json not found")
+    weight = _pick_ad_safetensors(AD_DIR)
+    write_ad_config(AD_DIR, weight)
 
     print("[DONE] Models baked at", MODELS_DIR)
 
