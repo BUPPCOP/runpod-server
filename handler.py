@@ -6,69 +6,58 @@ from app.inference import run_inference_animatediff
 TMP_DIR = "/tmp"
 os.makedirs(TMP_DIR, exist_ok=True)
 
-def _save_input_image(image_url: str | None, image_base64: str | None) -> str:
-    """image_url 또는 image_base64 중 하나를 받아 /tmp에 저장하고 경로 반환."""
-    out_path = os.path.join(TMP_DIR, f"input_{uuid.uuid4().hex}.jpg")
-    if image_url:
-        print(f"[HANDLER] downloading image_url: {image_url}", flush=True)
-        # 간단/안전: urllib 직접 사용 (추가 deps 불필요)
-        req = Request(image_url, headers={"User-Agent": "curl/8"})
-        with urlopen(req, timeout=30) as r, open(out_path, "wb") as f:
-            f.write(r.read())
-        return out_path
-    if image_base64:
-        print("[HANDLER] decoding image_base64", flush=True)
-        data = base64.b64decode(image_base64)
-        with open(out_path, "wb") as f:
-            f.write(data)
-        return out_path
-    raise ValueError("image_url or image_base64 is required")
+def _save_tmp_image_from_url(url: str) -> str:
+    print(f"[HANDLER] downloading image_url: {url}", flush=True)
+    req = Request(url, headers={"User-Agent": "curl/8"})
+    with urlopen(req, timeout=30) as r:
+        data = r.read()
+    fname = f"in_{uuid.uuid4().hex}.bin"
+    out_path = os.path.join(TMP_DIR, fname)
+    with open(out_path, "wb") as f:
+        f.write(data)
+    return out_path
+
+def _save_tmp_image_from_b64(b64: str) -> str:
+    print("[HANDLER] got image_base64", flush=True)
+    data = base64.b64decode(b64)
+    fname = f"in_{uuid.uuid4().hex}.bin"
+    out_path = os.path.join(TMP_DIR, fname)
+    with open(out_path, "wb") as f:
+        f.write(data)
+    return out_path
 
 def handler(event):
     t0 = time.time()
     try:
-        print("[HANDLER] event received:", json.dumps({
-            "id": event.get("id"),
-            "has_input": bool(event.get("input")),
-        }), flush=True)
-
         payload = event.get("input") or {}
         image_url = payload.get("image_url")
-        image_b64 = payload.get("image_base64") or payload.get("image_b64")  # 두 키 모두 허용
-        seed = payload.get("seed")
+        image_b64 = payload.get("image_base64")
+        seed = int(payload.get("seed", 1234))
         num_frames = int(payload.get("num_frames", 16))
         fps = int(payload.get("fps", 8))
         guidance_scale = float(payload.get("guidance_scale", 1.0))
 
-        # 입력 확보
-        img_path = _save_input_image(image_url, image_b64)
-        out_path = os.path.join(TMP_DIR, f"out_{uuid.uuid4().hex}.mp4")
+        if image_url:
+            image_path = _save_tmp_image_from_url(image_url)
+        elif image_b64:
+            image_path = _save_tmp_image_from_b64(image_b64)
+        else:
+            raise ValueError("image_url or image_base64 required")
 
-        # 추론
-        ok = run_inference_animatediff(
-            image_path=img_path,
-            output_path=out_path,
+        ok, out_video = run_inference_animatediff(
+            image_path=image_path,
+            seed=seed,
             num_frames=num_frames,
             fps=fps,
             guidance_scale=guidance_scale,
-            seed=seed,
         )
+        ms = int((time.time() - t0) * 1000)
 
-        elapsed = int((time.time() - t0) * 1000)
         if not ok:
-            print("[HANDLER] inference_failed", flush=True)
-            return {"error": "inference_failed", "ms": elapsed}
+            return {"success": False, "error": "inference_failed", "output": {"ms": ms}}
 
-        print(f"[HANDLER] done -> {out_path}", flush=True)
-        return {
-            "success": True,
-            "ms": elapsed,
-            "video_path": out_path  # 필요하면 presigned URL 업로드로 교체 가능
-        }
-
+        return {"success": True, "output": {"video_path": out_video, "ms": ms}}
     except Exception as e:
-        print("[HANDLER][EXC]", repr(e), flush=True)
-        traceback.print_exc()
-        return {"error": str(e)}
+        return {"success": False, "error": str(e), "trace": traceback.format_exc()}
 
 runpod.serverless.start({"handler": handler})

@@ -1,11 +1,12 @@
 fastapi
 uvicorn
 diffusers==0.29.*
-transformers==4.44.*
+transformers==4.*
+accelerate==0.30.*
 safetensors
-accelerate
-huggingface_hub[hf_transfer]==0.24.*
 pillow
 runpod
 imageio
 imageio-ffmpeg
+huggingface-hub>=0.24
+requests>=2.31
