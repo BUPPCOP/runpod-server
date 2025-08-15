@@ -44,6 +44,8 @@ def main():
     print("[OK] downloading AD Lightning:", AD_REPO, flush=True)
     snapshot_download(repo_id=AD_REPO, local_dir=AD_DIR.as_posix(), local_dir_use_symlinks=False)
 
+    print("[AD] files ->", sorted(os.listdir(AD_DIR)), flush=True)  # ★ 가시성 강화
+    
     # 실제 받아진 safetensors 파일명으로 config 생성
     weight = _pick_ad_safetensors(AD_DIR)
     write_ad_config(AD_DIR, weight)
