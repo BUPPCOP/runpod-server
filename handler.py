@@ -44,20 +44,41 @@ def handler(event):
         else:
             raise ValueError("image_url or image_base64 required")
 
-        ok, out_video = run_inference_animatediff(
+        # --- 핵심: 반환값 2튜플/3튜플 모두 안전하게 처리 ---
+        res = run_inference_animatediff(
             image_path=image_path,
             seed=seed,
             num_frames=num_frames,
             fps=fps,
             guidance_scale=guidance_scale,
         )
+        if isinstance(res, tuple):
+            if len(res) == 3:
+                ok, out_video, reason = res
+            elif len(res) == 2:
+                ok, out_video = res
+                reason = None
+            else:
+                ok, out_video, reason = False, None, f"unexpected return shape: {len(res)}"
+        else:
+            ok, out_video, reason = False, None, "unexpected return type"
+
         ms = int((time.time() - t0) * 1000)
 
         if not ok:
-            return {"success": False, "error": "inference_failed", "output": {"ms": ms}}
+            return {
+                "success": False,
+                "error": "inference_failed",
+                "reason": reason,
+                "output": {"ms": ms},
+            }
 
         return {"success": True, "output": {"video_path": out_video, "ms": ms}}
     except Exception as e:
-        return {"success": False, "error": str(e), "trace": traceback.format_exc()}
+        return {
+            "success": False,
+            "error": str(e),
+            "trace": traceback.format_exc(),
+        }
 
 runpod.serverless.start({"handler": handler})

@@ -14,7 +14,8 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 def _load_image(path: str) -> Image.Image:
     im = Image.open(path).convert("RGB")
-    im.thumbnail((768, 768))  # OOM 방지
+    # OOM 방지용: 폭/높이 768 이내로 축소
+    im.thumbnail((768, 768))
     return im
 
 def _ensure_models():
@@ -33,6 +34,10 @@ def run_inference_animatediff(
     fps: int = 8,
     guidance_scale: float = 1.0,
 ) -> Tuple[bool, Optional[str], Optional[str]]:
+    """
+    Returns:
+        (ok: bool, out_video_path: Optional[str], reason: Optional[str])
+    """
     _ensure_models()
     try:
         torch.manual_seed(seed)
@@ -58,7 +63,7 @@ def run_inference_animatediff(
 
         init_image = _load_image(image_path)
 
-        # ★ 가장 중요한 수정: image= 로 명시
+        # ★ 중요: 위치 인자 대신 명시적 키워드 사용 (버전별 시그니처 차이 방지)
         result = pipe(
             image=init_image,
             guidance_scale=guidance_scale,
