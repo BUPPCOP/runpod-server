@@ -1,13 +1,12 @@
 import os, sys, json, time, traceback
 from pathlib import Path
-from typing import Optional
-from huggingface_hub import snapshot_download, HfHubHTTPError
+# ⛔️ HfHubHTTPError 불필요 — 일부 버전에서 공개되지 않음
+from huggingface_hub import snapshot_download
 
 MODELS_DIR = Path("/app/models")
 SD_DIR = MODELS_DIR / "sd_base"
 AD_DIR = MODELS_DIR / "ad_lightning"
 
-# 필요 시 @commit 으로 리비전 고정 가능 (가급적 리비전 고정 권장)
 BASE_REPO = os.getenv("BASE_REPO", "runwayml/stable-diffusion-v1-5")
 AD_REPO   = os.getenv("AD_LIGHTNING_REPO", "ByteDance/AnimateDiff-Lightning")
 HF_TOKEN  = os.getenv("HF_TOKEN")
@@ -18,7 +17,8 @@ def ensure_dir(p: Path):
     p.mkdir(parents=True, exist_ok=True)
 
 def retry_snapshot(repo_id: str, local_dir: str):
-    last_err: Optional[Exception] = None
+    """간단 재시도 (예외 타입에 의존 X)"""
+    last_err = None
     for i in range(1, MAX_RETRY + 1):
         try:
             print(f"[DL] {repo_id} -> {local_dir} (try {i}/{MAX_RETRY})", flush=True)
@@ -29,12 +29,12 @@ def retry_snapshot(repo_id: str, local_dir: str):
                 token=HF_TOKEN,
             )
             return
-        except Exception as e:
+        except Exception as e:  # ← 여기만 잡으면 됩니다
             last_err = e
             wait = min(30, 2 ** i)
             print(f"[DL] failed try {i}: {e} ; sleep {wait}s", flush=True)
             time.sleep(wait)
-    raise last_err  # 최종 실패
+    raise last_err  # 최종 실패 시 그대로 올려 중단
 
 def pick_safetensors(d: Path) -> str:
     cands = list(d.glob("*.safetensors"))
@@ -57,12 +57,10 @@ def write_ad_config(ad_dir: Path, weight_name: str):
     print(f"[AD] config -> {cfg} (motion_modules={weight_name})", flush=True)
 
 def sanity_sd(sd_dir: Path):
-    # 필수 디렉터리
     for p in [sd_dir / "model_index.json", sd_dir / "scheduler",
               sd_dir / "unet", sd_dir / "vae", sd_dir / "text_encoder", sd_dir / "tokenizer"]:
         if not p.exists():
             raise RuntimeError(f"SD base missing: {p}")
-    # UNet/ VAE 가중치(단일/샤드/빈) 모두 허용
     def has_weights(sub: str):
         sdir = sd_dir / sub
         return any(sdir.glob("diffusion_pytorch_model*.safetensors")) or \
@@ -76,21 +74,17 @@ def main():
     print("[BAKE] HF_HOME:", os.getenv("HF_HOME"), flush=True)
     ensure_dir(MODELS_DIR); ensure_dir(SD_DIR); ensure_dir(AD_DIR)
 
-    # ---- SD: 전체 다운로드 (가장 안전) ----
     print(f"[BAKE] SD base: {BASE_REPO}", flush=True)
     retry_snapshot(BASE_REPO, SD_DIR.as_posix())
     sanity_sd(SD_DIR)
 
-    # ---- AD: 전체 다운로드 (작아서 부담 적음) ----
     print(f"[BAKE] AD Lightning: {AD_REPO}", flush=True)
     retry_snapshot(AD_REPO, AD_DIR.as_posix())
-    files = sorted(os.listdir(AD_DIR))
-    print("[BAKE] AD files:", files, flush=True)
+    print("[BAKE] AD files:", sorted(os.listdir(AD_DIR)), flush=True)
 
     weight = pick_safetensors(AD_DIR)
     write_ad_config(AD_DIR, weight)
 
-    # 최종 존재 확인
     if not (AD_DIR / "config.json").exists():
         raise RuntimeError(f"AD config.json missing in {AD_DIR}")
 
