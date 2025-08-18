@@ -20,8 +20,11 @@ RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 # ---- Bake settings (안정 우선) ----
 ARG BAKE_MODE=true
 ENV BAKE_MODE=${BAKE_MODE}
-ENV HF_HOME=/root/.cache/huggingface \
-    HF_HUB_ENABLE_HF_TRANSFER=0   # ← 안전 모드(고속전송 비활성화)
+
+# 주석은 별도 줄에 두고, ENV는 한 줄에 하나로!
+# (고속전송 끄는 안전 모드)
+ENV HF_HOME=/root/.cache/huggingface
+ENV HF_HUB_ENABLE_HF_TRANSFER=0
 
 # Bake & cleanup
 RUN /bin/bash -lc '\
