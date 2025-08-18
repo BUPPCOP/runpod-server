@@ -10,3 +10,4 @@ imageio
 imageio-ffmpeg
 huggingface-hub>=0.24
 requests>=2.31
+hf_transfer>=0.1.6
