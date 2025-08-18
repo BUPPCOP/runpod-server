@@ -19,3 +19,19 @@ app/models/
 
 .cache/
 data/
+
+# .dockerignore
+.git
+.gitignore
+*.zip
+*.tar
+*.tgz
+*.log
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+dist/
+build/
+.output-image
+
+

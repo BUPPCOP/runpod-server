@@ -17,16 +17,13 @@ COPY . /app
 # CRLF 방지 + 실행권한
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
-# ---- 베이크 고정 ----
-# BAKE_MODE 기본값 true (RunPod Build Args에서 덮어쓰지 않도록)
+# ---- Bake settings ----
 ARG BAKE_MODE=true
 ENV BAKE_MODE=${BAKE_MODE}
-
-# 모델 캐시 최적화
 ENV HF_HOME=/root/.cache/huggingface \
     HF_HUB_ENABLE_HF_TRANSFER=1
 
-# 베이크: 실패 시 즉시 빌드 중단
+# Bake & cleanup
 RUN /bin/bash -lc '\
   echo "[DISK] before:"; df -h; \
   if [ "${BAKE_MODE}" = "true" ]; then \
@@ -37,6 +34,11 @@ RUN /bin/bash -lc '\
     echo "[BAKE] is false -> build will fail (we require baked models)"; \
     exit 2; \
   fi; \
-  echo "[DISK] after:"; df -h'
+  echo "[CLEAN] purge caches"; \
+  rm -rf /root/.cache/pip/* /root/.cache/huggingface/* /var/lib/apt/lists/*; \
+  find /app -name "__pycache__" -type d -exec rm -rf {} +; \
+  du -sh /app/models || true; \
+  echo "[DISK] after:"; df -h \
+'
 
 ENTRYPOINT ["/bin/bash","-lc","/app/entrypoint.sh"]
