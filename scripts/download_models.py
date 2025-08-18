@@ -6,21 +6,22 @@ MODELS_DIR = Path("/app/models")
 SD_DIR = MODELS_DIR / "sd_base"
 AD_DIR = MODELS_DIR / "ad_lightning"
 
+# 필요 시 @commit 으로 리비전 고정 가능
 BASE_REPO = os.getenv("BASE_REPO", "runwayml/stable-diffusion-v1-5")
 AD_REPO   = os.getenv("AD_LIGHTNING_REPO", "ByteDance/AnimateDiff-Lightning")
+HF_TOKEN  = os.getenv("HF_TOKEN")  # 비공개/레이트리밋 회피용(선택)
 
 def ensure_dir(p: Path):
     p.mkdir(parents=True, exist_ok=True)
 
 def _pick_ad_safetensors(ad_dir: Path) -> str:
-    """레포에서 받은 .safetensors 중 4‑step/diffusers 포함 파일을 우선 선택"""
     cands = list(ad_dir.glob("*.safetensors"))
     if not cands:
-        raise RuntimeError("AD Lightning *.safetensors not found in " + str(ad_dir))
+        raise RuntimeError(f"AD Lightning *.safetensors not found in {ad_dir}")
+    # 우선순위: 4step / diffusers 포함 파일 가점
     def score(p: Path):
-        name = p.name.lower()
-        # 4step + diffusers 포함 파일 가중
-        return int("4" in name and "step" in name) + int("diffusers" in name)
+        n = p.name.lower()
+        return int("4" in n and "step" in n) + int("diffusers" in n)
     cands.sort(key=score, reverse=True)
     return cands[0].name
 
@@ -29,28 +30,43 @@ def write_ad_config(ad_dir: Path, weight_name: str):
     payload = {
         "_class_name": "MotionAdapter",
         "sample_size": 512,
-        "motion_modules": [weight_name]
+        "motion_modules": [weight_name],
     }
     cfg.write_text(json.dumps(payload, indent=2))
     print(f"[AD] Wrote config -> {cfg} (motion_modules={weight_name})", flush=True)
 
 def main():
-    print("[ENV] HF_HOME:", os.getenv("HF_HOME"), flush=True)
+    print("[BAKE] HF_HOME:", os.getenv("HF_HOME"), flush=True)
     ensure_dir(MODELS_DIR); ensure_dir(SD_DIR); ensure_dir(AD_DIR)
 
-    print("[OK] downloading SD base:", BASE_REPO, flush=True)
-    snapshot_download(repo_id=BASE_REPO, local_dir=SD_DIR.as_posix(), local_dir_use_symlinks=False)
+    print(f"[BAKE] SD base: {BASE_REPO}", flush=True)
+    snapshot_download(
+        repo_id=BASE_REPO,
+        local_dir=SD_DIR.as_posix(),
+        local_dir_use_symlinks=False,
+        token=HF_TOKEN,
+    )
 
-    print("[OK] downloading AD Lightning:", AD_REPO, flush=True)
-    snapshot_download(repo_id=AD_REPO, local_dir=AD_DIR.as_posix(), local_dir_use_symlinks=False)
+    print(f"[BAKE] AD Lightning: {AD_REPO}", flush=True)
+    snapshot_download(
+        repo_id=AD_REPO,
+        local_dir=AD_DIR.as_posix(),
+        local_dir_use_symlinks=False,
+        token=HF_TOKEN,
+    )
+    print("[BAKE] AD files:", sorted(os.listdir(AD_DIR)), flush=True)
 
-    print("[AD] files ->", sorted(os.listdir(AD_DIR)), flush=True)  # ★ 가시성 강화
-    
-    # 실제 받아진 safetensors 파일명으로 config 생성
+    # config.json 생성 (파일명 자동 감지)
     weight = _pick_ad_safetensors(AD_DIR)
     write_ad_config(AD_DIR, weight)
 
-    print("[DONE] Models baked at", MODELS_DIR, flush=True)
+    # Sanity check (강제)
+    if not (SD_DIR / "model_index.json").exists():
+        raise RuntimeError(f"SD base model_index.json missing in {SD_DIR}")
+    if not (AD_DIR / "config.json").exists():
+        raise RuntimeError(f"AD config.json missing in {AD_DIR}")
+
+    print("[BAKE] DONE at", MODELS_DIR, flush=True)
 
 if __name__ == "__main__":
     try:
