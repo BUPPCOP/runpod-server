@@ -10,18 +10,18 @@ WORKDIR /app
 
 # Python deps
 COPY requirements.txt /app/requirements.txt
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
 # App
 COPY . /app
 # CRLF 방지 + 실행권한
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
-# ---- Bake settings ----
+# ---- Bake settings (안정 우선) ----
 ARG BAKE_MODE=true
 ENV BAKE_MODE=${BAKE_MODE}
 ENV HF_HOME=/root/.cache/huggingface \
-    HF_HUB_ENABLE_HF_TRANSFER=1
+    HF_HUB_ENABLE_HF_TRANSFER=0   # ← 안전 모드(고속전송 비활성화)
 
 # Bake & cleanup
 RUN /bin/bash -lc '\
@@ -36,7 +36,7 @@ RUN /bin/bash -lc '\
   fi; \
   echo "[CLEAN] purge caches"; \
   rm -rf /root/.cache/pip/* /root/.cache/huggingface/* /var/lib/apt/lists/*; \
-  find /app -name "__pycache__" -type d -exec rm -rf {} +; \
+  find /app -name \"__pycache__\" -type d -exec rm -rf {} +; \
   du -sh /app/models || true; \
   echo "[DISK] after:"; df -h \
 '
